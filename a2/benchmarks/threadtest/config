@@ -1,0 +1,6 @@
+# per-benchmark configuration values
+[DEFAULT]
+# kheap needs <6s with 8 threads
+maxtime = 60
+args = 10000 420 10
+graphtitle = 'threadtest - runtimes'

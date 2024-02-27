@@ -1,0 +1,7 @@
+# per-benchmark configuration values
+[DEFAULT]
+# larson should end after 15s fixed time. Allow twice that.
+maxtime = 30
+#args are: sleep_cnt, min_size, max_size, chperthread, num_rounds, seed
+args = 15 8 40 10000 10 1 
+graphtitle = "larson - throughput"

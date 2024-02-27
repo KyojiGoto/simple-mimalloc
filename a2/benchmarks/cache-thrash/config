@@ -1,0 +1,6 @@
+# per-benchmark configuration values
+[DEFAULT]
+# kheap needs <10s with 8 threads
+maxtime = 60
+args = 1000 8 100000
+graphtitle = "cache-thrash - runtimes"
