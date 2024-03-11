@@ -185,7 +185,7 @@ void static inline atomic_push(struct block_t *_Atomic *list, struct block_t *bl
 	// set value pointed to by list to block (make block head)
 	// therefore, when the while terminates, block is head of list,
 	// and rest of list is pointed to by block
-	while (!atomic_compare_exchange_strong(list, &block->next, &block))
+	while (!atomic_compare_exchange_strong(list, &block->next, block))
 		;
 }
 
@@ -301,6 +301,7 @@ bool linked_list_contains(struct page *list, struct page *pg)
 	return false;
 }
 
+// precondition: page->free == NULL
 void page_collect(page *page)
 {
 	page->free = page->local_free; // move the local num_free_pages list
@@ -311,10 +312,28 @@ void page_collect(page *page)
 		return;
 	// append freelist to thread freelist
 	struct block_t *tail = tfree;
-	while (tail->next != NULL)
+	size_t thread_freelist_length = 1;
+	while (tail->next != NULL) {
+		assert((uint64_t) tail >= (uint64_t) page->page_area);
+		assert((uint64_t) tail < (uint64_t) page->reserved);
+
 		tail = tail->next;
+		thread_freelist_length ++;
+	}
+
+	// update num_thread_freed and num_used
+	assert(thread_freelist_length <= page->total_num_blocks);
+	size_t old = atomic_fetch_sub(&page->num_thread_freed, thread_freelist_length);
+	page->num_used -= thread_freelist_length;
+
+	assert(old <= page->total_num_blocks);
+
+	// TODO remove 
+	size_t new_num_thread_freed = atomic_load(&page->num_thread_freed);
+	assert(new_num_thread_freed <= page->total_num_blocks);
 	tail->next = page->free;
 	page->free = tfree; // head of thread freelist is now head of free list
+
 }
 
 enum page_kind_enum get_page_kind(size_t size)
@@ -419,6 +438,11 @@ segment *malloc_huge_segment(thread_heap *heap, size_t size)
 			else
 			{
 				num_contiguous++;
+				if (num_contiguous == num_contiguous_segments_required)
+				{
+					break;
+				}
+				
 			}
 		}
 	}
@@ -712,7 +736,6 @@ void page_free(struct page *page)
 	thread_heap *heap = &tlb[get_cpuid()];
 	assert(heap->init == true);
 	struct page **size_class_list = &heap->pages[size_class(page->block_size)];
-	// assert(!linked_list_contains(*size_class_list, page));//TODO: REMOVE, it is expensive
 	assert(segment->free_pages != *size_class_list);
 	// TODO: ensure this is proper logic
 	if (*size_class_list != NULL && *size_class_list == page)
@@ -843,6 +866,7 @@ void *malloc_small(thread_heap *heap, size_t size)
 	size_t page_index = pages_direct_index(size);
 	assert(page_index < NUM_DIRECT_PAGES);
 	struct page *page = heap->pages_direct[page_index];
+	
 	// if the page exists, make sure it's block size is correct
 	assert(page == NULL || page->block_size == (page_index + 1) * 8);
 
@@ -920,11 +944,11 @@ void mm_free(void *ptr)
 	struct block_t *block = (struct block_t *)ptr;
 
 	size_t id = get_cpuid();
-	assert(tlb[id].init == true);
 	if (id == segment->cpu_id)
 	{ // local free
 		block->next = page->local_free;
 		page->local_free = block;
+		assert(page->num_used != 0);
 		page->num_used--;
 		if (page->num_used - atomic_load(&page->num_thread_freed) == 0)
 			page_free(page);
